@@ -42,6 +42,7 @@ Add-Type -Namespace DshToast -Name Native -MemberDefinition @'
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern System.IntPtr WindowFromPoint(POINT point);
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool GetWindowRect(System.IntPtr hWnd, out RECT rect);
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(System.IntPtr hWnd, out uint processId);
+[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern int GetClassName(System.IntPtr hWnd, System.Text.StringBuilder name, int max);
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, System.UIntPtr dwExtraInfo);
 [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
 [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
@@ -66,7 +67,10 @@ function Test-WindowCovered {
     if ($width -lt 40 -or $height -lt 40) { return $false }
 
     # Windows' own notification/tray surfaces must not count as covering apps.
-    $ignored = @('ShellExperienceHost', 'StartMenuExperienceHost', 'TextInputHost', 'SearchHost', 'SearchApp', 'explorer')
+    $ignored = @('ShellExperienceHost', 'StartMenuExperienceHost', 'TextInputHost', 'SearchHost', 'SearchApp')
+    # explorer.exe hosts both File Explorer windows (real cover) and the shell
+    # surfaces below; only the shell classes are ignored.
+    $shellClasses = @('Shell_TrayWnd', 'Shell_SecondaryTrayWnd', 'TrayNotifyWnd', 'Progman', 'WorkerW')
 
     for ($fx = 1; $fx -le 4; $fx++) {
         for ($fy = 1; $fy -le 4; $fy++) {
@@ -83,6 +87,11 @@ function Test-WindowCovered {
             $processName = ''
             try { $processName = (Get-Process -Id $processId -ErrorAction Stop).ProcessName } catch { $processName = '' }
             if ($ignored -contains $processName) { continue }
+            if ($processName -eq 'explorer') {
+                $className = New-Object System.Text.StringBuilder 256
+                [DshToast.Native]::GetClassName($underRoot, $className, 256) | Out-Null
+                if ($shellClasses -contains $className.ToString()) { continue }
+            }
             return $true
         }
     }
