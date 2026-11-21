@@ -11,7 +11,8 @@ param(
     [ValidateSet('default', 'silent')][string]$Sound = 'default',
     [ValidateSet('short', 'long')][string]$Duration = 'short',
     [string]$Tag = '',
-    [string]$Group = 'dsh'
+    [string]$Group = 'dsh',
+    [string]$Launch = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -24,10 +25,16 @@ function Esc {
 }
 
 function Build-ToastXml {
-    param([string]$TitleText, [string]$BodyText, [string]$IconPath, [string]$SoundName, [string]$DurationKind)
+    param([string]$TitleText, [string]$BodyText, [string]$IconPath, [string]$SoundName, [string]$DurationKind, [string]$LaunchUri)
 
     $lines = New-Object System.Collections.Generic.List[string]
-    $lines.Add('<toast activationType="foreground" duration="' + $DurationKind + '">')
+    if ([string]::IsNullOrWhiteSpace($LaunchUri)) {
+        $lines.Add('<toast activationType="foreground" duration="' + $DurationKind + '">')
+    }
+    else {
+        # A protocol activation launches the click bridge registered by protocol.ps1.
+        $lines.Add('<toast activationType="protocol" launch="' + (Esc $LaunchUri) + '" duration="' + $DurationKind + '">')
+    }
     $lines.Add('  <visual>')
     $lines.Add('    <binding template="ToastGeneric">')
     $lines.Add('      <text>' + (Esc $TitleText) + '</text>')
@@ -56,7 +63,7 @@ function Show-WithAppId {
     [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
     [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
 
-    $xmlText = Build-ToastXml -TitleText $Title -BodyText $Body -IconPath $Icon -SoundName $Sound -DurationKind $Duration
+    $xmlText = Build-ToastXml -TitleText $Title -BodyText $Body -IconPath $Icon -SoundName $Sound -DurationKind $Duration -LaunchUri $Launch
     $document = New-Object Windows.Data.Xml.Dom.XmlDocument
     $document.LoadXml($xmlText)
     $toast = New-Object Windows.UI.Notifications.ToastNotification $document

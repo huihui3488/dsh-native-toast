@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Desktop toast notifications",
-    "description": "Shows a native Windows notification when a task finishes or the agent needs a choice or approval; text, image, sound, and notification identity stay adjustable.",
+    "description": "Shows a native Windows notification when a task finishes or the agent needs a choice or approval; clicking one brings the app forward and scrolls to the finished turn or the question. Text, image, sound, and notification identity stay adjustable.",
     "detail": "docs/DETAIL.md"
   }
 }

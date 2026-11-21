@@ -1,15 +1,17 @@
 {
   "name": "dsh-native-toast",
-  "version": "1.0.0",
-  "description": "Windows notification-center toasts for DeepSeek Harness when a turn finishes or the agent waits for a choice or approval.",
+  "version": "1.1.0",
+  "description": "Windows notification-center toasts for DeepSeek Harness; clicking one focuses the app and scrolls to the finished turn or the pending question.",
   "type": "module",
   "exports": {
     ".": "./index.js",
+    "./client": "./client.js",
     "./locale/*.json": "./locale/*.json",
     "./icon": "./assets/dsh-logo.png"
   },
   "files": [
     "index.js",
+    "client.js",
     "cordis.patch.yml",
     "README.md",
     "LICENSE",
@@ -21,6 +23,10 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
     }
   },
   "peerDependencies": {

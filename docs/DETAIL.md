@@ -18,6 +18,14 @@
 
 通知使用 DeepSeek Harness 已安装的 `com.deepseek.dsh` 通知身份，因此系统里显示的应用名是 **DeepSeek Harness**，左侧图标是内置的 DS 徽标（`assets/dsh-logo.png`，也可换成自己的图片）。通知内容为两行：第一行是标题，第二行是副标题。
 
+## 点击通知
+
+- **把窗口带回来**：恢复并聚焦桌面窗口；如果应用没在运行，会尝试启动它。
+- **完成任务的通知**：会话滚动到最底部（已经在底部也会再滚一次）。
+- **选择 / 批准的通知**：滚动到那条提问并把第一个选项聚焦，按回车即可作答；找不到提问文本时退回滚到底部。
+
+实现方式：插件启用时在 `HKCU\Software\Classes` 注册 `dsh-native-toast:` 协议（禁用插件时移除），点击通知由 `powershell/activate.ps1` 处理并记录到 Host 的本地路由，插件的 Client 半边（`client.js`）轮询该路由完成滚动。因此点击需要网页界面正在打开；超过 30 秒的点击会被忽略。这两条本地路由只接受本机回环地址。
+
 ## 配置
 
 安装后进入 **插件 → 桌面通知弹窗**，行上的「配置」按钮会打开表单；也可以直接改 `cordis.patch.yml` 中 `id: desktop-toast` 这一行的 `config`。
@@ -41,6 +49,7 @@
 | `minGapMs` | `900` | 两条通知最小间隔 |
 | `powershellPath` | 空 | 自定义 powershell.exe |
 | `debugLog` | `false` | 把通知记录写入 `%TEMP%\dsh-native-toast.log` |
+| `clickToFocus` | `true` | 点击通知时聚焦窗口并滚动到任务完成处或待回答的提问 |
 
 ## 手动预览
 
@@ -57,4 +66,4 @@ powershell.exe -NoProfile -File "<插件目录>\powershell\toast.ps1" -Title "�
 - 仅支持 Windows，且需要系统「通知」对该应用开启、未处于「专注助手/勿扰」屏蔽状态。
 - 通知归属默认复用已安装 DeepSeek Harness 的开始菜单快捷方式（`com.deepseek.dsh`）；检测不到该快捷方式时（例如只用 `dsh web` 的机器）会自动退回 Windows PowerShell 的通知身份，保证通知仍能弹出，只是应用名显示为 Windows PowerShell。也可以手动把 `appId` 设为 `{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe`。
 - 每次通知会启动一次 Windows PowerShell（约 0.3–0.6 秒），属于低频事件，不影响对话速度。
-- 点击通知目前不会自动切回窗口。
+- 点击通知需要网页界面正在打开、且由桌面壳托管窗口；纯 CLI 会话没有可聚焦的窗口。点击记录 30 秒后过期。

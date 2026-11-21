@@ -12,7 +12,7 @@
  * can be re-styled later without touching this file.
  */
 import { spawn } from 'node:child_process'
-import { appendFileSync, existsSync } from 'node:fs'
+import { appendFileSync, existsSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -31,6 +31,14 @@ const WINDOWS_POWERSHELL = join(
 const POWERSHELL_FALLBACK_APP_ID = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe'
 const DEFAULT_DESKTOP_APP_ID = 'com.deepseek.dsh'
 const MAX_TEXT = 220
+const PROTOCOL_SCHEME = 'dsh-native-toast'
+const CLICK_PATH = '/api/dsh-native-toast/click'
+const PENDING_PATH = '/api/dsh-native-toast/pending'
+const STATUS_PATH = '/api/dsh-native-toast/status'
+const CLICK_TTL_MS = 30_000
+const ACTIVATE_SCRIPT = join(HERE, 'powershell', 'activate.ps1')
+const PROTOCOL_SCRIPT = join(HERE, 'powershell', 'protocol.ps1')
+const STATE_FILE = join(tmpdir(), 'dsh-native-toast-state.json')
 
 export const name = 'desktop-toast'
 
@@ -52,6 +60,7 @@ export const Config = Schema.object({
   minGapMs: Schema.number().default(900).description('两条通知之间的最小间隔（毫秒）。'),
   powershellPath: Schema.string().default('').description('自定义 powershell.exe 路径，留空自动使用系统 Windows PowerShell。'),
   debugLog: Schema.boolean().default(false).description('把每次通知写入临时目录日志，便于排查。'),
+  clickToFocus: Schema.boolean().default(true).description('点击通知时聚焦 DSH 窗口，并滚动到会话底部或对应提问。'),
 })
 
 function clampNumber(value, fallback, min, max) {
@@ -84,6 +93,7 @@ function resolveConfig(input) {
     minGapMs: clampNumber(raw.minGapMs, 900, 0, 60000),
     powershellPath: text(raw.powershellPath, ''),
     debugLog: raw.debugLog === true,
+    clickToFocus: raw.clickToFocus !== false,
   }
 }
 
@@ -141,6 +151,139 @@ export function apply(ctx, rawConfig) {
     }
   }
 
+  /*
+   * Toast click bridge: the toast's protocol activation runs
+   * powershell/activate.ps1, which brings the Desktop window forward and
+   * POSTs the click here. The Client half polls PENDING_PATH and scrolls the
+   * conversation or reveals the pending question.
+   */
+  let pendingAction
+  let lastPollAt = 0
+  let webServer
+  let origin = ''
+  try {
+    webServer = typeof ctx.get === 'function' ? ctx.get('webServer') : undefined
+    if (webServer && typeof webServer.getOrigin === 'function') origin = webServer.getOrigin()
+  } catch {
+    webServer = undefined
+    origin = ''
+  }
+
+  function isLoopback(req) {
+    const address = req && req.socket ? req.socket.remoteAddress : undefined
+    return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1'
+  }
+
+  function sendJson(res, status, payload) {
+    if (res.headersSent) return
+    res.statusCode = status
+    res.setHeader('content-type', 'application/json; charset=utf-8')
+    res.setHeader('cache-control', 'no-store')
+    res.end(JSON.stringify(payload))
+  }
+
+  /** GET PENDING_PATH — the Client half asks for a click newer than `since`. */
+  function onPending(req, res) {
+    if (!isLoopback(req)) return sendJson(res, 403, { action: null })
+    if ((req.method ?? '').toUpperCase() !== 'GET') return sendJson(res, 405, { action: null })
+    lastPollAt = Date.now()
+    let since = 0
+    try {
+      since = Number(new URL(req.url ?? '/', 'http://localhost').searchParams.get('since') ?? '0') || 0
+    } catch {
+      since = 0
+    }
+    const action = pendingAction
+    if (action === undefined || action.at <= since || Date.now() - action.at > CLICK_TTL_MS) {
+      return sendJson(res, 200, { action: null })
+    }
+    return sendJson(res, 200, { action })
+  }
+
+  /** GET STATUS_PATH — local diagnostics for the click bridge. */
+  function onStatus(req, res) {
+    if (!isLoopback(req)) return sendJson(res, 403, { ok: false })
+    if ((req.method ?? '').toUpperCase() !== 'GET') return sendJson(res, 405, { ok: false })
+    return sendJson(res, 200, { origin, lastPollAt, pending: pendingAction ?? null })
+  }
+
+  /** POST CLICK_PATH — activate.ps1 records what the user clicked. */
+  function onClick(req, res) {
+    if (!isLoopback(req)) return sendJson(res, 403, { ok: false })
+    if ((req.method ?? '').toUpperCase() !== 'POST') return sendJson(res, 405, { ok: false })
+    let kind = 'complete'
+    let text = ''
+    try {
+      const url = new URL(req.url ?? '/', 'http://localhost')
+      kind = (url.searchParams.get('kind') ?? 'complete').slice(0, 32)
+      text = (url.searchParams.get('text') ?? '').slice(0, MAX_TEXT)
+    } catch {
+      /* malformed query falls back to a plain completion click */
+    }
+    pendingAction = { kind, text, at: Date.now() }
+    log('click kind=' + kind + ' text=' + text)
+    return sendJson(res, 200, { ok: true })
+  }
+
+  if (webServer !== undefined && typeof webServer.register === 'function') {
+    try {
+      ctx.effect(() => {
+        const offClick = webServer.register({ kind: 'exact', path: CLICK_PATH, handler: onClick })
+        const offPending = webServer.register({ kind: 'exact', path: PENDING_PATH, handler: onPending })
+        const offStatus = webServer.register({ kind: 'exact', path: STATUS_PATH, handler: onStatus })
+        return () => {
+          offClick()
+          offPending()
+          offStatus()
+        }
+      })
+    } catch (error) {
+      log('route-failed ' + String(error))
+    }
+  }
+
+  /** activate.ps1 needs the live origin and the Desktop executable to focus. */
+  try {
+    if (origin !== '') writeFileSync(STATE_FILE, JSON.stringify({ origin, exe: process.execPath }), 'utf8')
+  } catch (error) {
+    log('state-failed ' + String(error))
+  }
+
+  function runProtocolScript(remove) {
+    const shell = config.powershellPath !== '' ? config.powershellPath : WINDOWS_POWERSHELL
+    const args = [
+      '-NoProfile',
+      '-NonInteractive',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-WindowStyle',
+      'Hidden',
+      '-File',
+      PROTOCOL_SCRIPT,
+      '-ActivateScript',
+      ACTIVATE_SCRIPT,
+    ]
+    if (remove) args.push('-Remove')
+    try {
+      const child = spawn(shell, args, { windowsHide: true, stdio: 'ignore' })
+      child.on('error', (error) => log('protocol-error ' + String(error)))
+      child.on('exit', (code) => log('protocol exit=' + String(code) + ' remove=' + String(remove)))
+    } catch (error) {
+      log('protocol-spawn-failed ' + String(error))
+    }
+  }
+
+  if (config.clickToFocus) runProtocolScript(false)
+
+  ctx.effect(() => () => {
+    if (config.clickToFocus) runProtocolScript(true)
+    try {
+      unlinkSync(STATE_FILE)
+    } catch {
+      /* already gone */
+    }
+  })
+
   /** True for the session the user is actually driving, after optional subagent opt-in. */
   function isRootAgent(agent) {
     if (config.includeSubagents) return true
@@ -162,7 +305,7 @@ export function apply(ctx, rawConfig) {
   }
 
   /** Run toast.ps1 once; resolves on exit, spawn error, or a 15s timeout. */
-  function showToast(title, body) {
+  function showToast(title, body, click) {
     const shell = config.powershellPath !== '' ? config.powershellPath : WINDOWS_POWERSHELL
     const logo = config.showLogo
       ? config.logoPath !== '' && existsSync(config.logoPath)
@@ -190,6 +333,15 @@ export function apply(ctx, rawConfig) {
       config.playSound ? 'default' : 'silent',
     ]
     if (logo !== '') args.push('-Icon', logo)
+    if (click !== undefined) {
+      const launch =
+        PROTOCOL_SCHEME +
+        '://click?kind=' +
+        encodeURIComponent(click.kind) +
+        '&text=' +
+        encodeURIComponent(click.text ?? '')
+      args.push('-Launch', launch)
+    }
     return new Promise((resolve) => {
       let child
       try {
@@ -237,7 +389,7 @@ export function apply(ctx, rawConfig) {
     }
     const next = pending.shift()
     running = true
-    showToast(next.title, next.body).finally(() => {
+    showToast(next.title, next.body, next.click).finally(() => {
       running = false
       lastShownAt = Date.now()
       drain()
@@ -263,7 +415,8 @@ export function apply(ctx, rawConfig) {
       if (now - at > Math.max(config.dedupeMs, 30000)) recent.delete(key)
     }
     if (pending.length >= 8) pending.shift()
-    pending.push({ title: heading, body: content })
+    const click = config.clickToFocus ? { kind, text: content } : undefined
+    pending.push({ title: heading, body: content, click })
     drain()
   }
 

@@ -1,11 +1,19 @@
 # Desktop toast notifications for DeepSeek Harness
 
-Windows notification-center toasts for DeepSeek Harness: one when a turn finishes, one when the agent waits for your choice, and one when it waits for a tool approval. The toast is attributed to **DeepSeek Harness** (or Windows PowerShell when that identity is not registered), carries the DS logo, and keeps its text, image, sound, and per-event switches in the plugin's Config.
+Windows notification-center toasts for DeepSeek Harness: one when a turn finishes, one when the agent waits for your choice, and one when it waits for a tool approval. Clicking a toast brings the app forward and takes you to the right place. The toast is attributed to **DeepSeek Harness** (or Windows PowerShell when that identity is not registered), carries the DS logo, and keeps its text, image, sound, and per-event switches in the plugin's Config.
 
 ```
 任务已完成！
 DeepSeek Harness
 ```
+
+## Click behaviour
+
+- **Bring the app forward**: the Desktop window is restored and focused; if it is not running, it is started.
+- **Finished turn**: the conversation scrolls to the bottom.
+- **Choice or approval**: the conversation scrolls to the pending question and focuses its first option, so the answer is one keystroke away. If the question text cannot be found, it falls back to the bottom.
+
+This works through a per-user URL protocol, `dsh-native-toast:`, registered under `HKCU\Software\Classes` while the plugin is enabled and removed when it is disabled. The protocol handler is `powershell/activate.ps1`; it records the click on the Host's local route, and the plugin's Client half (`client.js`) polls that route and performs the scroll. Clicking needs the Web GUI page to be open; an action older than 30 seconds is ignored.
 
 ## What it does
 
@@ -47,6 +55,7 @@ Every row field is editable from **Plugins → Desktop toast notifications → C
 | `dedupeMs` / `minGapMs` | `1500` / `900` | duplicate window, minimum gap |
 | `powershellPath` | empty | custom `powershell.exe` |
 | `debugLog` | `false` | append each toast to `%TEMP%\dsh-native-toast.log` |
+| `clickToFocus` | `true` | bring the app forward and scroll on click |
 
 ## Preview without waiting for a turn
 
@@ -60,7 +69,7 @@ Options: `-Icon <absolute path>`, `-AppId <AUMID>`, `-Sound silent`, `-Duration 
 
 - Windows only. The user must leave notifications enabled for the app and must not be in Focus Assist / Do Not Disturb.
 - The toast is attributed to DeepSeek Harness only when the Desktop installer's Start Menu shortcut (`com.deepseek.dsh`) exists; otherwise the plugin falls back to the always-registered Windows PowerShell identity so the toast still appears.
-- Clicking a toast does not focus the DSH window (no COM activator is registered).
+- Clicking a toast needs the Web GUI page to be open and needs the Desktop shell to own the window; a headline-only CLI Session has no window to focus. The click action expires after 30 seconds.
 - Each toast starts one Windows PowerShell process (~0.3–0.6 s). Notifications are low-frequency, so this does not affect a turn.
 
 ## License
