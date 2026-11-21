@@ -1,5 +1,5 @@
 # Renders one Windows notification-center toast for DeepSeek Harness.
-# Invoked by the DSH Host plugin `@local/dsh-notify-toast`; can also be run by
+# Invoked by the DSH Host plugin `dsh-native-toast`; can also be run by
 # hand to preview text, logo, app id, sound, or duration changes:
 #   powershell.exe -NoProfile -File toast.ps1 -Title "任务已完成！" -Body "DeepSeek Harness"
 [CmdletBinding()]

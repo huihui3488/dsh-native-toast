@@ -125,7 +125,7 @@ export function apply(ctx, rawConfig) {
 
   const pending = []
   const recent = new Map()
-  const logPath = join(tmpdir(), 'dsh-notify-toast.log')
+  const logPath = join(tmpdir(), 'dsh-native-toast.log')
   let running = false
   let lastShownAt = 0
   let drainTimer

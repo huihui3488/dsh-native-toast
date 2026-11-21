@@ -24,7 +24,7 @@ DeepSeek Harness
 ## Install
 
 ```sh
-dsh plugin --profile <profile> add github:owner/dsh-notify-toast
+dsh plugin --profile <profile> add github:huihui3488/dsh-native-toast
 ```
 
 Or install the package directory from **Plugins → Add plugin** in the Desktop app. Windows only: on other platforms the plugin activates and does nothing.
@@ -46,7 +46,7 @@ Every row field is editable from **Plugins → Desktop toast notifications → C
 | `playSound` | `true` | play the system notification sound |
 | `dedupeMs` / `minGapMs` | `1500` / `900` | duplicate window, minimum gap |
 | `powershellPath` | empty | custom `powershell.exe` |
-| `debugLog` | `false` | append each toast to `%TEMP%\dsh-notify-toast.log` |
+| `debugLog` | `false` | append each toast to `%TEMP%\dsh-native-toast.log` |
 
 ## Preview without waiting for a turn
 

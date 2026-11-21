@@ -40,7 +40,7 @@
 | `dedupeMs` | `1500` | 相同内容去重窗口 |
 | `minGapMs` | `900` | 两条通知最小间隔 |
 | `powershellPath` | 空 | 自定义 powershell.exe |
-| `debugLog` | `false` | 把通知记录写入 `%TEMP%\dsh-notify-toast.log` |
+| `debugLog` | `false` | 把通知记录写入 `%TEMP%\dsh-native-toast.log` |
 
 ## 手动预览
 
