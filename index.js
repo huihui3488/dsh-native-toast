@@ -35,6 +35,7 @@ const PROTOCOL_SCHEME = 'dsh-native-toast'
 const CLICK_PATH = '/api/dsh-native-toast/click'
 const PENDING_PATH = '/api/dsh-native-toast/pending'
 const STATUS_PATH = '/api/dsh-native-toast/status'
+const REPORT_PATH = '/api/dsh-native-toast/report'
 const CLICK_TTL_MS = 30_000
 const ACTIVATE_SCRIPT = join(HERE, 'powershell', 'activate.ps1')
 const PROTOCOL_SCRIPT = join(HERE, 'powershell', 'protocol.ps1')
@@ -164,6 +165,7 @@ export function apply(ctx, rawConfig) {
   let lastClientSession = ''
   let lastClientHelloAt = 0
   let lastClientError = ''
+  let lastDomDump = ''
   let webServer
   let origin = ''
   try {
@@ -229,8 +231,29 @@ export function apply(ctx, rawConfig) {
       lastClientSession,
       lastClientHelloAt,
       lastClientError,
+      lastDomDump,
       pending: pendingAction ?? null,
       clientInGraph,
+    })
+  }
+
+  /** POST REPORT_PATH — the Client half reports a DOM sample for diagnosis. */
+  function onReport(req, res) {
+    if (!isLoopback(req)) return sendJson(res, 403, { ok: false })
+    if ((req.method ?? '').toUpperCase() !== 'POST') return sendJson(res, 405, { ok: false })
+    let body = ''
+    req.on('data', (chunk) => {
+      body += chunk
+      if (body.length > 40000) req.destroy()
+    })
+    req.on('end', () => {
+      try {
+        const parsed = JSON.parse(body)
+        lastDomDump = String(parsed && parsed.dom ? parsed.dom : '').slice(0, 12000)
+      } catch {
+        lastDomDump = ''
+      }
+      sendJson(res, 200, { ok: true })
     })
   }
 
@@ -260,10 +283,12 @@ export function apply(ctx, rawConfig) {
         const offClick = webServer.register({ kind: 'exact', path: CLICK_PATH, handler: onClick })
         const offPending = webServer.register({ kind: 'exact', path: PENDING_PATH, handler: onPending })
         const offStatus = webServer.register({ kind: 'exact', path: STATUS_PATH, handler: onStatus })
+        const offReport = webServer.register({ kind: 'exact', path: REPORT_PATH, handler: onReport })
         return () => {
           offClick()
           offPending()
           offStatus()
+          offReport()
         }
       })
     } catch (error) {

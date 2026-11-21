@@ -12,8 +12,8 @@ DeepSeek Harness
 - **Window already on screen** (visible, not minimized): it is never moved or resized. If another window covers part of it, the app is brought to the front; when it is already in front, nothing changes.
 - **Another conversation is open**: the app switches to the Session the toast belongs to, then scrolls there.
 - **Minimized or hidden**: the window is restored and focused, keeping its maximized/normal state; if the app is not running, it is started.
-- **Finished turn**: the conversation scrolls to the bottom.
-- **Choice or approval**: the conversation scrolls to the pending question and focuses its first option, so the answer is one keystroke away. If the question text cannot be found, it falls back to the bottom.
+- **Finished turn**: the conversation scrolls so the start of the latest assistant output sits 24 px below the top of the transcript.
+- **Choice or approval**: the conversation is positioned the same way, and the pending question's first option is focused, so the answer is one keystroke away. If the question text cannot be found, only the scroll happens.
 
 This works through a per-user URL protocol, `dsh-native-toast:`, registered under `HKCU\Software\Classes` while the plugin is enabled and removed when it is disabled. The protocol handler is `powershell/activate.ps1`; it records the click on the Host's local route, and the plugin's Client half (`client.js`) polls that route and performs the scroll. Clicking needs the Web GUI page to be open; an action older than 30 seconds is ignored.
 
@@ -78,3 +78,4 @@ Options: `-Icon <absolute path>`, `-AppId <AUMID>`, `-Sound silent`, `-Duration 
 ## License
 
 MIT
+

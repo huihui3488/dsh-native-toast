@@ -4,15 +4,17 @@
  * The Host records a click in `/api/dsh-native-toast/pending` when the OS
  * launches the toast protocol; this module polls that route, switches to the
  * Session the toast belongs to when the page shows another one, then scrolls
- * to the finished turn or reveals the pending question. It renders only an
- * empty probe that reports the currently open Session; no visible UI.
+ * the conversation so the assistant output of the latest turn starts near the
+ * top of the transcript. A pending question gets its first option focused.
  */
 window.__ModuleLoader__.load({
   id: 'dsh-native-toast',
   factory(require) {
     const PENDING = '/api/dsh-native-toast/pending'
+    const REPORT = '/api/dsh-native-toast/report'
     const POLL_MS = 1500
     const SWITCH_TIMEOUT_MS = 4000
+    const OUTPUT_TOP_GAP = 24
 
     let currentSession = ''
 
@@ -22,8 +24,9 @@ window.__ModuleLoader__.load({
       return null
     }
 
-    /** The tallest scrollable column right of the sidebar, i.e. the transcript. */
     function findTranscript() {
+      const explicit = document.querySelector('[data-conversation-scroll]')
+      if (explicit !== null) return explicit
       let best = null
       for (const element of document.querySelectorAll('div, main, section')) {
         const style = getComputedStyle(element)
@@ -37,13 +40,48 @@ window.__ModuleLoader__.load({
       return best
     }
 
-    function scrollToBottom() {
-      const transcript = findTranscript()
+    /** First node of the newest turn: its collapsed process row starts the output. */
+    function outputAnchor() {
+      const nodes = Array.from(document.querySelectorAll('[data-chat-node-key]'))
+      if (nodes.length === 0) return null
+      const last = nodes[nodes.length - 1]
+      const turn = last.getAttribute('data-chat-turn')
+      if (turn === null) return last
+      const inTurn = nodes.filter((node) => node.getAttribute('data-chat-turn') === turn)
+      const process = inTurn.find((node) => node.getAttribute('data-chat-flow-kind') === 'turn-process')
+      return process ?? inTurn[0] ?? null
+    }
+
+    function scrollToBottom(transcript) {
       if (transcript === null) {
-        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' })
+        window.scrollTo({ top: document.body.scrollHeight })
         return
       }
-      transcript.scrollTo({ top: transcript.scrollHeight, behavior: 'smooth' })
+      transcript.scrollTop = transcript.scrollHeight
+    }
+
+    /** Put the start of the latest assistant output `OUTPUT_TOP_GAP` below the top. */
+    function scrollToOutputStart(instant) {
+      const behavior = instant === true ? 'auto' : 'smooth'
+      const transcript = findTranscript()
+      const anchor = outputAnchor()
+      if (anchor === null) {
+        scrollToBottom(transcript)
+        return
+      }
+      if (transcript === null) {
+        anchor.scrollIntoView({ block: 'start', behavior })
+        return
+      }
+      const offset =
+        anchor.getBoundingClientRect().top -
+        transcript.getBoundingClientRect().top +
+        transcript.scrollTop -
+        OUTPUT_TOP_GAP
+      transcript.scrollTo({
+        top: Math.max(0, Math.min(offset, transcript.scrollHeight - transcript.clientHeight)),
+        behavior,
+      })
     }
 
     /** The last visible node showing the pending question text. */
@@ -66,11 +104,10 @@ window.__ModuleLoader__.load({
       return found
     }
 
-    /** Scroll the question into view and focus its first option; false when absent. */
-    function revealQuestion(needle) {
+    /** Focus the question's first option without moving the scroll position. */
+    function focusQuestion(needle) {
       const node = findQuestionNode(needle)
       if (node === null) return false
-      node.scrollIntoView({ block: 'center', behavior: 'smooth' })
       let scope = node
       for (let depth = 0; depth < 7 && scope !== null; depth += 1) {
         const target = scope.querySelector('button, [role="button"], [role="radio"], input[type="radio"]')
@@ -83,23 +120,42 @@ window.__ModuleLoader__.load({
       return true
     }
 
-    function retryReveal(action, attempt) {
-      if (attempt >= 8) {
-        scrollToBottom()
-        return
-      }
-      setTimeout(() => {
-        if (!revealQuestion(action.text)) retryReveal(action, attempt + 1)
-      }, 250)
+    function retryFocus(action, attempt) {
+      if (attempt >= 10) return
+      if (!focusQuestion(action.text)) setTimeout(() => retryFocus(action, attempt + 1), 200)
     }
 
-    function act(action) {
-      if (action.kind === 'question' || action.kind === 'approval') {
-        if (!revealQuestion(action.text)) retryReveal(action, 0)
-        return
+    function reportScroll(action) {
+      try {
+        const transcript = findTranscript()
+        const anchor = outputAnchor()
+        const detail = {
+          kind: action.kind,
+          scrollTop: transcript === null ? -1 : Math.round(transcript.scrollTop),
+          anchorOffset:
+            transcript === null || anchor === null
+              ? -1
+              : Math.round(anchor.getBoundingClientRect().top - transcript.getBoundingClientRect().top),
+        }
+        void fetch(REPORT, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ dom: JSON.stringify(detail) }),
+        }).catch(() => {})
+      } catch {
+        /* diagnosis only */
       }
-      scrollToBottom()
-      setTimeout(scrollToBottom, 400)
+    }
+
+    let lastAction = 0
+    function act(action) {
+      scrollToOutputStart(false)
+      if (action.kind === 'question' || action.kind === 'approval') retryFocus(action, 0)
+      setTimeout(() => scrollToOutputStart(true), 550)
+      if (Date.now() !== lastAction) {
+        lastAction = Date.now()
+        setTimeout(() => reportScroll(action), 1400)
+      }
     }
 
     /** After a Session switch the transcript mounts late, so wait for it. */
@@ -139,10 +195,6 @@ window.__ModuleLoader__.load({
         let since = 0
         let busy = false
 
-        function report(query) {
-          void fetch(PENDING + '?since=' + since + query, { cache: 'no-store' }).catch(() => {})
-        }
-
         try {
           const uiWorkspace = typeof ctx.get === 'function' ? ctx.get('uiWorkspace') : undefined
 
@@ -157,11 +209,7 @@ window.__ModuleLoader__.load({
             if (busy || document.hidden) return
             busy = true
             try {
-              const url =
-                PENDING +
-                '?since=' + since +
-                '&cur=' + encodeURIComponent(currentSession) +
-                '&hello=0'
+              const url = PENDING + '?since=' + since + '&cur=' + encodeURIComponent(currentSession)
               const response = await fetch(url, { cache: 'no-store' })
               if (response.ok) {
                 const body = await response.json()
@@ -189,13 +237,18 @@ window.__ModuleLoader__.load({
             }
           })
 
-          report('&hello=1&cur=' + encodeURIComponent(currentSession))
+          void fetch(PENDING + '?since=0&hello=1&cur=' + encodeURIComponent(currentSession), {
+            cache: 'no-store',
+          }).catch(() => {})
         } catch (error) {
           const message = error && error.message ? error.message : String(error)
-          report('&hello=1&err=' + encodeURIComponent(message))
+          void fetch(PENDING + '?since=0&hello=1&err=' + encodeURIComponent(message), {
+            cache: 'no-store',
+          }).catch(() => {})
           throw error
         }
       },
     }
   },
 })
+
