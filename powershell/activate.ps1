@@ -38,8 +38,69 @@ Add-Type -Namespace DshToast -Name Native -MemberDefinition @'
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern System.IntPtr GetForegroundWindow();
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool IsWindowVisible(System.IntPtr hWnd);
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool IsIconic(System.IntPtr hWnd);
+[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern System.IntPtr GetAncestor(System.IntPtr hWnd, uint gaFlags);
+[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern System.IntPtr WindowFromPoint(POINT point);
+[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool GetWindowRect(System.IntPtr hWnd, out RECT rect);
+[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(System.IntPtr hWnd, out uint processId);
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, System.UIntPtr dwExtraInfo);
+[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
 '@
+
+function Test-IsForeground {
+    param([System.IntPtr]$Handle)
+    $foreground = [DshToast.Native]::GetForegroundWindow()
+    if ($foreground -eq [System.IntPtr]::Zero) { return $false }
+    return ([DshToast.Native]::GetAncestor($foreground, 2) -eq [DshToast.Native]::GetAncestor($Handle, 2))
+}
+
+function Test-WindowCovered {
+    param([System.IntPtr]$Handle)
+    # Already in front: nothing to raise, and no sampled point can say otherwise.
+    if (Test-IsForeground -Handle $Handle) { return $false }
+
+    $rect = New-Object DshToast.Native+RECT
+    if (-not [DshToast.Native]::GetWindowRect($Handle, [ref]$rect)) { return $false }
+    $width = $rect.Right - $rect.Left
+    $height = $rect.Bottom - $rect.Top
+    if ($width -lt 40 -or $height -lt 40) { return $false }
+
+    # Windows' own notification/tray surfaces must not count as covering apps.
+    $ignored = @('ShellExperienceHost', 'StartMenuExperienceHost', 'TextInputHost', 'SearchHost', 'SearchApp', 'explorer')
+
+    for ($fx = 1; $fx -le 4; $fx++) {
+        for ($fy = 1; $fy -le 4; $fy++) {
+            $point = New-Object DshToast.Native+POINT
+            $point.X = $rect.Left + [int]($width * $fx / 5)
+            $point.Y = $rect.Top + [int]($height * $fy / 5)
+            $under = [DshToast.Native]::WindowFromPoint($point)
+            if ($under -eq [System.IntPtr]::Zero) { continue }
+            $underRoot = [DshToast.Native]::GetAncestor($under, 2)
+            if ($underRoot -eq [System.IntPtr]::Zero) { continue }
+            if ($underRoot -eq [DshToast.Native]::GetAncestor($Handle, 2)) { continue }
+            $processId = 0
+            [DshToast.Native]::GetWindowThreadProcessId($underRoot, [ref]$processId) | Out-Null
+            $processName = ''
+            try { $processName = (Get-Process -Id $processId -ErrorAction Stop).ProcessName } catch { $processName = '' }
+            if ($ignored -contains $processName) { continue }
+            return $true
+        }
+    }
+    return $false
+}
+
+function Raise-DshWindow {
+    param([System.IntPtr]$Handle)
+    # Foreground only: never move, resize, or change the maximized state.
+    [DshToast.Native]::SetForegroundWindow($Handle) | Out-Null
+    if (-not (Test-IsForeground -Handle $Handle)) {
+        # Windows' foreground lock admits the next call after an Alt tap.
+        [DshToast.Native]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero)
+        [DshToast.Native]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)
+        Start-Sleep -Milliseconds 60
+        [DshToast.Native]::SetForegroundWindow($Handle) | Out-Null
+    }
+}
 
 function Focus-DshWindow {
     $proc = Get-Process -Name 'DeepSeek Harness' -ErrorAction SilentlyContinue |
@@ -63,9 +124,14 @@ function Focus-DshWindow {
     $visible = [DshToast.Native]::IsWindowVisible($handle)
     $minimized = [DshToast.Native]::IsIconic($handle)
 
-    # Already on screen: leave position, size and z-order untouched; the click
-    # still scrolls, which is the whole point when the user is looking at it.
-    if ($visible -and -not $minimized) { return }
+    if ($visible -and -not $minimized) {
+        # On screen: never move or resize. Only raise it when another window
+        # actually covers part of it; a fully visible window stays as it is.
+        if (Test-WindowCovered -Handle $handle) {
+            Raise-DshWindow -Handle $handle
+        }
+        return
+    }
 
     if ($minimized) {
         # SW_RESTORE only from minimized; on a visible maximized window it would
@@ -75,14 +141,7 @@ function Focus-DshWindow {
     else {
         [DshToast.Native]::ShowWindow($handle, 5) | Out-Null
     }
-    [DshToast.Native]::SetForegroundWindow($handle) | Out-Null
-    if ([DshToast.Native]::GetForegroundWindow() -ne $handle) {
-        # Windows' foreground lock admits the next call after an Alt tap.
-        [DshToast.Native]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero)
-        [DshToast.Native]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)
-        Start-Sleep -Milliseconds 60
-        [DshToast.Native]::SetForegroundWindow($handle) | Out-Null
-    }
+    Raise-DshWindow -Handle $handle
 }
 
 $query = Get-Query -Url $Uri

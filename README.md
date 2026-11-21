@@ -9,7 +9,7 @@ DeepSeek Harness
 
 ## Click behaviour
 
-- **Window already on screen** (visible, not minimized): nothing about the window changes — no move, resize, or focus change. The conversation just scrolls.
+- **Window already on screen** (visible, not minimized): it is never moved or resized. If another window covers part of it, the app is brought to the front; when it is already in front, nothing changes.
 - **Another conversation is open**: the app switches to the Session the toast belongs to, then scrolls there.
 - **Minimized or hidden**: the window is restored and focused, keeping its maximized/normal state; if the app is not running, it is started.
 - **Finished turn**: the conversation scrolls to the bottom.
@@ -72,6 +72,7 @@ Options: `-Icon <absolute path>`, `-AppId <AUMID>`, `-Sound silent`, `-Duration 
 - Windows only. The user must leave notifications enabled for the app and must not be in Focus Assist / Do Not Disturb.
 - The toast is attributed to DeepSeek Harness only when the Desktop installer's Start Menu shortcut (`com.deepseek.dsh`) exists; otherwise the plugin falls back to the always-registered Windows PowerShell identity so the toast still appears.
 - Clicking a toast needs the Web GUI page to be open and needs the Desktop shell to own the window; a headline-only CLI Session has no window to focus. The click action expires after 30 seconds.
+- An always-on-top window from another app can keep covering the app even after it is raised.
 - Each toast starts one Windows PowerShell process (~0.3–0.6 s), launched through the bundled `powershell/hidden.vbs` under `wscript.exe` so no console window appears. Notifications are low-frequency, so this does not affect a turn.
 
 ## License
