@@ -36,6 +36,8 @@ Add-Type -Namespace DshToast -Name Native -MemberDefinition @'
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool ShowWindow(System.IntPtr hWnd, int nCmdShow);
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr hWnd);
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern System.IntPtr GetForegroundWindow();
+[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool IsWindowVisible(System.IntPtr hWnd);
+[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool IsIconic(System.IntPtr hWnd);
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, System.UIntPtr dwExtraInfo);
 '@
 
@@ -58,7 +60,21 @@ function Focus-DshWindow {
     if ($null -eq $proc) { return }
 
     $handle = $proc.MainWindowHandle
-    [DshToast.Native]::ShowWindow($handle, 9) | Out-Null
+    $visible = [DshToast.Native]::IsWindowVisible($handle)
+    $minimized = [DshToast.Native]::IsIconic($handle)
+
+    # Already on screen: leave position, size and z-order untouched; the click
+    # still scrolls, which is the whole point when the user is looking at it.
+    if ($visible -and -not $minimized) { return }
+
+    if ($minimized) {
+        # SW_RESTORE only from minimized; on a visible maximized window it would
+        # un-maximize and move/resize the window, which the user did not ask for.
+        [DshToast.Native]::ShowWindow($handle, 9) | Out-Null
+    }
+    else {
+        [DshToast.Native]::ShowWindow($handle, 5) | Out-Null
+    }
     [DshToast.Native]::SetForegroundWindow($handle) | Out-Null
     if ([DshToast.Native]::GetForegroundWindow() -ne $handle) {
         # Windows' foreground lock admits the next call after an Alt tap.
