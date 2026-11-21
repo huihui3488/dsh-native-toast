@@ -88,6 +88,7 @@ function Focus-DshWindow {
 $query = Get-Query -Url $Uri
 $kind = if ($query.ContainsKey('kind')) { $query['kind'] } else { 'complete' }
 $text = if ($query.ContainsKey('text')) { $query['text'] } else { '' }
+$session = if ($query.ContainsKey('session')) { $query['session'] } else { '' }
 
 Focus-DshWindow
 
@@ -95,6 +96,7 @@ $state = Get-State
 if ($state -and $state.origin) {
     $clickUrl = $state.origin.TrimEnd('/') +
         '/api/dsh-native-toast/click?kind=' + [uri]::EscapeDataString($kind) +
-        '&text=' + [uri]::EscapeDataString($text)
+        '&text=' + [uri]::EscapeDataString($text) +
+        '&session=' + [uri]::EscapeDataString($session)
     try { Invoke-RestMethod -Uri $clickUrl -Method Post -TimeoutSec 5 | Out-Null } catch { }
 }

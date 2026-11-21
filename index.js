@@ -161,6 +161,9 @@ export function apply(ctx, rawConfig) {
    */
   let pendingAction
   let lastPollAt = 0
+  let lastClientSession = ''
+  let lastClientHelloAt = 0
+  let lastClientError = ''
   let webServer
   let origin = ''
   try {
@@ -191,7 +194,13 @@ export function apply(ctx, rawConfig) {
     lastPollAt = Date.now()
     let since = 0
     try {
-      since = Number(new URL(req.url ?? '/', 'http://localhost').searchParams.get('since') ?? '0') || 0
+      const probe = new URL(req.url ?? '/', 'http://localhost')
+      since = Number(probe.searchParams.get('since') ?? '0') || 0
+      const current = probe.searchParams.get('cur')
+      if (current !== null) lastClientSession = current.slice(0, 64)
+      if (probe.searchParams.get('hello') === '1') lastClientHelloAt = Date.now()
+      const reported = probe.searchParams.get('err')
+      if (reported !== null) lastClientError = reported.slice(0, 500)
     } catch {
       since = 0
     }
@@ -214,7 +223,15 @@ export function apply(ctx, rawConfig) {
     } catch {
       clientInGraph = false
     }
-    return sendJson(res, 200, { origin, lastPollAt, pending: pendingAction ?? null, clientInGraph })
+    return sendJson(res, 200, {
+      origin,
+      lastPollAt,
+      lastClientSession,
+      lastClientHelloAt,
+      lastClientError,
+      pending: pendingAction ?? null,
+      clientInGraph,
+    })
   }
 
   /** POST CLICK_PATH — activate.ps1 records what the user clicked. */
@@ -223,15 +240,17 @@ export function apply(ctx, rawConfig) {
     if ((req.method ?? '').toUpperCase() !== 'POST') return sendJson(res, 405, { ok: false })
     let kind = 'complete'
     let text = ''
+    let session = ''
     try {
       const url = new URL(req.url ?? '/', 'http://localhost')
       kind = (url.searchParams.get('kind') ?? 'complete').slice(0, 32)
       text = (url.searchParams.get('text') ?? '').slice(0, MAX_TEXT)
+      session = (url.searchParams.get('session') ?? '').slice(0, 64)
     } catch {
       /* malformed query falls back to a plain completion click */
     }
-    pendingAction = { kind, text, at: Date.now() }
-    log('click kind=' + kind + ' text=' + text)
+    pendingAction = { kind, text, session, at: Date.now() }
+    log('click kind=' + kind + ' session=' + session + ' text=' + text)
     return sendJson(res, 200, { ok: true })
   }
 
@@ -371,7 +390,9 @@ export function apply(ctx, rawConfig) {
         '://click?kind=' +
         encodeURIComponent(click.kind) +
         '&text=' +
-        encodeURIComponent(click.text ?? '')
+        encodeURIComponent(click.text ?? '') +
+        '&session=' +
+        encodeURIComponent(click.session ?? '')
       args.push('-Launch', launch)
     }
     return new Promise((resolve) => {
@@ -447,7 +468,7 @@ export function apply(ctx, rawConfig) {
       if (now - at > Math.max(config.dedupeMs, 30000)) recent.delete(key)
     }
     if (pending.length >= 8) pending.shift()
-    const click = config.clickToFocus ? { kind, text: content } : undefined
+    const click = config.clickToFocus ? { kind, text: content, session: scope } : undefined
     pending.push({ title: heading, body: content, click })
     drain()
   }

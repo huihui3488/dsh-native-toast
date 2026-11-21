@@ -10,6 +10,7 @@ DeepSeek Harness
 ## Click behaviour
 
 - **Window already on screen** (visible, not minimized): nothing about the window changes — no move, resize, or focus change. The conversation just scrolls.
+- **Another conversation is open**: the app switches to the Session the toast belongs to, then scrolls there.
 - **Minimized or hidden**: the window is restored and focused, keeping its maximized/normal state; if the app is not running, it is started.
 - **Finished turn**: the conversation scrolls to the bottom.
 - **Choice or approval**: the conversation scrolls to the pending question and focuses its first option, so the answer is one keystroke away. If the question text cannot be found, it falls back to the bottom.
