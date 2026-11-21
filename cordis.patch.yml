@@ -1,0 +1,5 @@
+- insert:
+    - id: desktop-toast
+      name: dsh-native-toast
+      config:
+        enabled: true

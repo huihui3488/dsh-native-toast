@@ -1,0 +1,51 @@
+{
+  "name": "dsh-native-toast",
+  "version": "1.0.0",
+  "description": "Windows notification-center toasts for DeepSeek Harness when a turn finishes or the agent waits for a choice or approval.",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./assets/dsh-logo.png"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE",
+    "locale/*.json",
+    "docs",
+    "assets",
+    "powershell"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/schemastery": "*"
+  },
+  "engines": {
+    "node": ">=22",
+    "dsh": ">=0.2.2-rc.1 <0.3.0-0"
+  },
+  "license": "MIT",
+  "author": "huihui3488",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/huihui3488/dsh-native-toast.git"
+  },
+  "homepage": "https://github.com/huihui3488/dsh-native-toast",
+  "bugs": {
+    "url": "https://github.com/huihui3488/dsh-native-toast/issues"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "notification",
+    "toast",
+    "windows"
+  ]
+}
