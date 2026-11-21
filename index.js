@@ -38,6 +38,8 @@ const STATUS_PATH = '/api/dsh-native-toast/status'
 const CLICK_TTL_MS = 30_000
 const ACTIVATE_SCRIPT = join(HERE, 'powershell', 'activate.ps1')
 const PROTOCOL_SCRIPT = join(HERE, 'powershell', 'protocol.ps1')
+const HIDDEN_LAUNCHER = join(HERE, 'powershell', 'hidden.vbs')
+const WSCRIPT = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'wscript.exe')
 const STATE_FILE = join(tmpdir(), 'dsh-native-toast-state.json')
 
 export const name = 'desktop-toast'
@@ -257,6 +259,28 @@ export function apply(ctx, rawConfig) {
     log('state-failed ' + String(error))
   }
 
+  /**
+   * Start one PowerShell command with no console window at all. wscript.exe is
+   * a GUI-subsystem host, so it never allocates a console the way a direct
+   * powershell.exe spawn can; the direct spawn remains as the fallback when
+   * Windows Script Host is unavailable.
+   */
+  function launchHidden(psPath, psArgs) {
+    if (existsSync(WSCRIPT) && existsSync(HIDDEN_LAUNCHER)) {
+      try {
+        const child = spawn(WSCRIPT, ['//B', '//Nologo', HIDDEN_LAUNCHER, psPath, ...psArgs], {
+          windowsHide: true,
+          stdio: 'ignore',
+          detached: false,
+        })
+        return child
+      } catch (error) {
+        log('wscript-failed ' + String(error))
+      }
+    }
+    return spawn(psPath, psArgs, { windowsHide: true, stdio: 'ignore', detached: false })
+  }
+
   function runProtocolScript(remove) {
     const shell = config.powershellPath !== '' ? config.powershellPath : WINDOWS_POWERSHELL
     const args = [
@@ -273,7 +297,7 @@ export function apply(ctx, rawConfig) {
     ]
     if (remove) args.push('-Remove')
     try {
-      const child = spawn(shell, args, { windowsHide: true, stdio: 'ignore' })
+      const child = launchHidden(shell, args)
       child.on('error', (error) => log('protocol-error ' + String(error)))
       child.on('exit', (code) => log('protocol exit=' + String(code) + ' remove=' + String(remove)))
     } catch (error) {
@@ -353,7 +377,7 @@ export function apply(ctx, rawConfig) {
     return new Promise((resolve) => {
       let child
       try {
-        child = spawn(shell, args, { windowsHide: true, stdio: 'ignore', detached: false })
+        child = launchHidden(shell, args)
       } catch (error) {
         log('spawn-failed ' + String(error))
         resolve()

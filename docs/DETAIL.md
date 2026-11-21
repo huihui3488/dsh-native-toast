@@ -65,5 +65,5 @@ powershell.exe -NoProfile -File "<插件目录>\powershell\toast.ps1" -Title "�
 
 - 仅支持 Windows，且需要系统「通知」对该应用开启、未处于「专注助手/勿扰」屏蔽状态。
 - 通知归属默认复用已安装 DeepSeek Harness 的开始菜单快捷方式（`com.deepseek.dsh`）；检测不到该快捷方式时（例如只用 `dsh web` 的机器）会自动退回 Windows PowerShell 的通知身份，保证通知仍能弹出，只是应用名显示为 Windows PowerShell。也可以手动把 `appId` 设为 `{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe`。
-- 每次通知会启动一次 Windows PowerShell（约 0.3–0.6 秒），属于低频事件，不影响对话速度。
+- 每次通知会启动一次 Windows PowerShell（约 0.3–0.6 秒），通过随包的 `powershell/hidden.vbs` 交给 `wscript.exe` 隐藏启动，不会闪出命令行窗口。属于低频事件，不影响对话速度。
 - 点击通知需要网页界面正在打开、且由桌面壳托管窗口；纯 CLI 会话没有可聚焦的窗口。点击记录 30 秒后过期。
