@@ -204,7 +204,15 @@ export function apply(ctx, rawConfig) {
   function onStatus(req, res) {
     if (!isLoopback(req)) return sendJson(res, 403, { ok: false })
     if ((req.method ?? '').toUpperCase() !== 'GET') return sendJson(res, 405, { ok: false })
-    return sendJson(res, 200, { origin, lastPollAt, pending: pendingAction ?? null })
+    let clientInGraph = false
+    try {
+      const clientModules = typeof ctx.get === 'function' ? ctx.get('clientModules') : undefined
+      const graph = clientModules && typeof clientModules.graph === 'function' ? clientModules.graph() : undefined
+      clientInGraph = graph !== undefined && JSON.stringify(graph).includes('dsh-native-toast')
+    } catch {
+      clientInGraph = false
+    }
+    return sendJson(res, 200, { origin, lastPollAt, pending: pendingAction ?? null, clientInGraph })
   }
 
   /** POST CLICK_PATH — activate.ps1 records what the user clicked. */
