@@ -129,13 +129,27 @@ window.__ModuleLoader__.load({
       try {
         const transcript = findTranscript()
         const anchor = outputAnchor()
+        const scrollers = Array.from(document.querySelectorAll('[data-conversation-scroll]')).map((element) => ({
+          id: element.getAttribute('data-conversation-scroll') || '',
+          top: Math.round(element.scrollTop),
+          max: Math.round(element.scrollHeight - element.clientHeight),
+          h: element.clientHeight,
+        }))
         const detail = {
           kind: action.kind,
-          scrollTop: transcript === null ? -1 : Math.round(transcript.scrollTop),
-          anchorOffset:
-            transcript === null || anchor === null
+          transcript: transcript === null ? 'none' : {
+            top: Math.round(transcript.scrollTop),
+            max: Math.round(transcript.scrollHeight - transcript.clientHeight),
+            h: transcript.clientHeight,
+          },
+          scrollers,
+          anchor: anchor === null ? 'none' : {
+            turn: anchor.getAttribute('data-chat-turn'),
+            flow: anchor.getAttribute('data-chat-flow-kind'),
+            offset: transcript === null
               ? -1
               : Math.round(anchor.getBoundingClientRect().top - transcript.getBoundingClientRect().top),
+          },
         }
         void fetch(REPORT, {
           method: 'POST',

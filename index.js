@@ -12,7 +12,7 @@
  * can be re-styled later without touching this file.
  */
 import { spawn } from 'node:child_process'
-import { appendFileSync, existsSync, unlinkSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -42,6 +42,7 @@ const PROTOCOL_SCRIPT = join(HERE, 'powershell', 'protocol.ps1')
 const HIDDEN_LAUNCHER = join(HERE, 'powershell', 'hidden.vbs')
 const WSCRIPT = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'wscript.exe')
 const STATE_FILE = join(tmpdir(), 'dsh-native-toast-state.json')
+const CLICK_FILE = join(tmpdir(), 'dsh-native-toast-click.json')
 
 export const name = 'desktop-toast'
 
@@ -157,8 +158,9 @@ export function apply(ctx, rawConfig) {
   /*
    * Toast click bridge: the toast's protocol activation runs
    * powershell/activate.ps1, which brings the Desktop window forward and
-   * POSTs the click here. The Client half polls PENDING_PATH and scrolls the
-   * conversation or reveals the pending question.
+   * signals the click through CLICK_FILE. The Client half polls PENDING_PATH
+   * and scrolls the conversation or reveals the pending question. A file keeps
+   * the signal independent of the Host's listening port and of web auth.
    */
   let pendingAction
   let lastPollAt = 0
@@ -166,15 +168,9 @@ export function apply(ctx, rawConfig) {
   let lastClientHelloAt = 0
   let lastClientError = ''
   let lastDomDump = ''
-  let webServer
+  let lastClientSince = 0
+  let lastActionServedAt = 0
   let origin = ''
-  try {
-    webServer = typeof ctx.get === 'function' ? ctx.get('webServer') : undefined
-    if (webServer && typeof webServer.getOrigin === 'function') origin = webServer.getOrigin()
-  } catch {
-    webServer = undefined
-    origin = ''
-  }
 
   function isLoopback(req) {
     const address = req && req.socket ? req.socket.remoteAddress : undefined
@@ -198,6 +194,7 @@ export function apply(ctx, rawConfig) {
     try {
       const probe = new URL(req.url ?? '/', 'http://localhost')
       since = Number(probe.searchParams.get('since') ?? '0') || 0
+      lastClientSince = since
       const current = probe.searchParams.get('cur')
       if (current !== null) lastClientSession = current.slice(0, 64)
       if (probe.searchParams.get('hello') === '1') lastClientHelloAt = Date.now()
@@ -210,6 +207,7 @@ export function apply(ctx, rawConfig) {
     if (action === undefined || action.at <= since || Date.now() - action.at > CLICK_TTL_MS) {
       return sendJson(res, 200, { action: null })
     }
+    lastActionServedAt = Date.now()
     return sendJson(res, 200, { action })
   }
 
@@ -232,6 +230,8 @@ export function apply(ctx, rawConfig) {
       lastClientHelloAt,
       lastClientError,
       lastDomDump,
+      lastClientSince,
+      lastActionServedAt,
       pending: pendingAction ?? null,
       clientInGraph,
     })
@@ -277,31 +277,77 @@ export function apply(ctx, rawConfig) {
     return sendJson(res, 200, { ok: true })
   }
 
-  if (webServer !== undefined && typeof webServer.register === 'function') {
-    try {
-      ctx.effect(() => {
-        const offClick = webServer.register({ kind: 'exact', path: CLICK_PATH, handler: onClick })
-        const offPending = webServer.register({ kind: 'exact', path: PENDING_PATH, handler: onPending })
-        const offStatus = webServer.register({ kind: 'exact', path: STATUS_PATH, handler: onStatus })
-        const offReport = webServer.register({ kind: 'exact', path: REPORT_PATH, handler: onReport })
-        return () => {
-          offClick()
-          offPending()
-          offStatus()
-          offReport()
-        }
-      })
-    } catch (error) {
-      log('route-failed ' + String(error))
-    }
-  }
+  /*
+   * Web setup is deferred until webServer exists. Activation order is not
+   * guaranteed, and reading the origin once at apply left no routes and a
+   * stale callback origin after the app restarted on a new port.
+   */
+  ctx.inject(['webServer'], (webCtx) => {
+    const server = webCtx.webServer
 
-  /** activate.ps1 needs the live origin and the Desktop executable to focus. */
-  try {
-    if (origin !== '') writeFileSync(STATE_FILE, JSON.stringify({ origin, exe: process.execPath }), 'utf8')
-  } catch (error) {
-    log('state-failed ' + String(error))
-  }
+    const refreshOrigin = () => {
+      try {
+        const next = server.getOrigin()
+        if (typeof next === 'string' && next !== '') {
+          origin = next
+          try {
+            writeFileSync(STATE_FILE, JSON.stringify({ origin, exe: process.execPath }), 'utf8')
+          } catch (error) {
+            log('state-failed ' + String(error))
+          }
+          return true
+        }
+      } catch {
+        /* not listening yet */
+      }
+      return false
+    }
+
+    refreshOrigin()
+    let tries = 0
+    const retry = setInterval(() => {
+      tries += 1
+      if (refreshOrigin() || tries > 50) clearInterval(retry)
+    }, 100)
+    retry.unref?.()
+
+    webCtx.effect(() => {
+      const offClick = server.register({ kind: 'exact', path: CLICK_PATH, handler: onClick })
+      const offPending = server.register({ kind: 'exact', path: PENDING_PATH, handler: onPending })
+      const offStatus = server.register({ kind: 'exact', path: STATUS_PATH, handler: onStatus })
+      const offReport = server.register({ kind: 'exact', path: REPORT_PATH, handler: onReport })
+      return () => {
+        clearInterval(retry)
+        offClick()
+        offPending()
+        offStatus()
+        offReport()
+      }
+    })
+  })
+
+  /*
+   * activate.ps1 writes CLICK_FILE for every click; this watcher turns the
+   * newest record into the pending action the Client half consumes.
+   */
+  let lastClickAt = 0
+  const clickFileTimer = setInterval(() => {
+    try {
+      if (!existsSync(CLICK_FILE)) return
+      const parsed = JSON.parse(readFileSync(CLICK_FILE, 'utf8'))
+      const at = Number(parsed && parsed.at) || 0
+      if (at <= lastClickAt) return
+      lastClickAt = at
+      const kind = String(parsed.kind || 'complete').slice(0, 32)
+      const text = String(parsed.text || '').slice(0, MAX_TEXT)
+      const session = String(parsed.session || '').slice(0, 64)
+      pendingAction = { kind, text, session, at }
+      log('file-click kind=' + kind + ' session=' + session + ' text=' + text)
+    } catch {
+      /* a partial write is retried on the next tick */
+    }
+  }, 700)
+  clickFileTimer.unref?.()
 
   /**
    * Start one PowerShell command with no console window at all. wscript.exe is
@@ -565,6 +611,7 @@ export function apply(ctx, rawConfig) {
   ctx.effect(() => () => {
     disposed = true
     if (drainTimer) clearTimeout(drainTimer)
+    clearInterval(clickFileTimer)
     pending.length = 0
   })
 }

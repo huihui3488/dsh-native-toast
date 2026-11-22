@@ -26,7 +26,7 @@
 - **完成任务的通知**：把最新一轮的 AI 输出开头滚动到会话区域顶部下方 24px 的位置（与截图中的上端距离一致）。
 - **选择 / 批准的通知**：位置同样定位到 AI 输出开头，并把提问的第一个选项聚焦，按回车即可作答；找不到提问文本时只做滚动。
 
-实现方式：插件启用时在 `HKCU\Software\Classes` 注册 `dsh-native-toast:` 协议（禁用插件时移除），点击通知由 `powershell/activate.ps1` 处理并记录到 Host 的本地路由，插件的 Client 半边（`client.js`）轮询该路由完成滚动。因此点击需要网页界面正在打开；超过 30 秒的点击会被忽略。这两条本地路由只接受本机回环地址。
+实现方式：插件启用时在 `HKCU\Software\Classes` 注册 `dsh-native-toast:` 协议（禁用插件时移除），点击通知由 `powershell/activate.ps1` 处理并写入 `%TEMP%\dsh-native-toast-click.json`；Host 监听该文件，插件的 Client 半边（`client.js`）轮询 Host 的本地路由完成滚动。不依赖监听端口或网页鉴权，所以应用重启换了端口也照常工作。因此点击需要网页界面正在打开；超过 30 秒的点击会被忽略。本地路由只接受本机回环地址。
 
 ## 配置
 
@@ -70,4 +70,5 @@ powershell.exe -NoProfile -File "<插件目录>\powershell\toast.ps1" -Title "�
 - 每次通知会启动一次 Windows PowerShell（约 0.3–0.6 秒），通过随包的 `powershell/hidden.vbs` 交给 `wscript.exe` 隐藏启动，不会闪出命令行窗口。属于低频事件，不影响对话速度。
 - 点击通知需要网页界面正在打开、且由桌面壳托管窗口；纯 CLI 会话没有可聚焦的窗口。点击记录 30 秒后过期。
 - 其他程序的“始终置顶”窗口在 DSH 被提升后仍可能盖住它。
+
 

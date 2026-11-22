@@ -15,7 +15,7 @@ DeepSeek Harness
 - **Finished turn**: the conversation scrolls so the start of the latest assistant output sits 24 px below the top of the transcript.
 - **Choice or approval**: the conversation is positioned the same way, and the pending question's first option is focused, so the answer is one keystroke away. If the question text cannot be found, only the scroll happens.
 
-This works through a per-user URL protocol, `dsh-native-toast:`, registered under `HKCU\Software\Classes` while the plugin is enabled and removed when it is disabled. The protocol handler is `powershell/activate.ps1`; it records the click on the Host's local route, and the plugin's Client half (`client.js`) polls that route and performs the scroll. Clicking needs the Web GUI page to be open; an action older than 30 seconds is ignored.
+This works through a per-user URL protocol, `dsh-native-toast:`, registered under `HKCU\Software\Classes` while the plugin is enabled and removed when it is disabled. The protocol handler is `powershell/activate.ps1`; it writes the click to `%TEMP%\dsh-native-toast-click.json`, the Host watches that file, and the plugin's Client half (`client.js`) polls the Host's local route and performs the scroll. No listening port or web auth is involved, so a restarted Host on a new port keeps working. Clicking needs the Web GUI page to be open; an action older than 30 seconds is ignored.
 
 ## What it does
 
@@ -78,4 +78,5 @@ Options: `-Icon <absolute path>`, `-AppId <AUMID>`, `-Sound silent`, `-Duration 
 ## License
 
 MIT
+
 

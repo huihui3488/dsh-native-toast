@@ -160,11 +160,19 @@ $session = if ($query.ContainsKey('session')) { $query['session'] } else { '' }
 
 Focus-DshWindow
 
-$state = Get-State
-if ($state -and $state.origin) {
-    $clickUrl = $state.origin.TrimEnd('/') +
-        '/api/dsh-native-toast/click?kind=' + [uri]::EscapeDataString($kind) +
-        '&text=' + [uri]::EscapeDataString($text) +
-        '&session=' + [uri]::EscapeDataString($session)
-    try { Invoke-RestMethod -Uri $clickUrl -Method Post -TimeoutSec 5 | Out-Null } catch { }
+# The Host watches this file, so the click needs no port, origin, or web auth.
+$clickFile = Join-Path $env:TEMP 'dsh-native-toast-click.json'
+$record = [ordered]@{
+    kind    = $kind
+    text    = $text
+    session = $session
+    at      = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+} | ConvertTo-Json -Compress
+$tempFile = $clickFile + '.tmp'
+try {
+    [System.IO.File]::WriteAllText($tempFile, $record, [System.Text.UTF8Encoding]::new($false))
+    Move-Item -LiteralPath $tempFile -Destination $clickFile -Force
+}
+catch {
+    # A lost click only skips the scroll; the window focus still happened.
 }
