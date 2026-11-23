@@ -41,6 +41,8 @@ dsh plugin --profile <profile> add github:huihui3488/dsh-native-toast
 
 Or install the package directory from **Plugins → Add plugin** in the Desktop app. Windows only: on other platforms the plugin activates and does nothing.
 
+Every release also attaches the packed package as `dsh-native-toast-<version>.tgz` for pinning or offline install: unpack it and add the folder the same way. The market entry follows `main`.
+
 ## Configuration
 
 Every row field is editable from **Plugins → Desktop toast notifications → Configure** (schema-backed), or from the profile patch:
