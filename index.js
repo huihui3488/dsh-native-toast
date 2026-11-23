@@ -171,6 +171,7 @@ export function apply(ctx, rawConfig) {
   let lastClientSince = 0
   let lastActionServedAt = 0
   let origin = ''
+  let connection
 
   function isLoopback(req) {
     const address = req && req.socket ? req.socket.remoteAddress : undefined
@@ -185,8 +186,30 @@ export function apply(ctx, rawConfig) {
     res.end(JSON.stringify(payload))
   }
 
+  /*
+   * Connection owns the Host/Origin checks and the browser credential for its
+   * own routes; a plugin route has to ask for that same verdict itself.
+   * Without it any web page open in the browser — same machine, same loopback
+   * address — could read the pending click or steer the scroll target.
+   */
+  function rejectUntrusted(req, res, empty) {
+    if (!connection || typeof connection.requestRejection !== 'function') return false
+    let verdict
+    try {
+      verdict = connection.requestRejection({ headers: req.headers })
+    } catch (error) {
+      log('trust-check-failed ' + String(error))
+      return false
+    }
+    if (verdict === undefined) return false
+    log('trust-reject ' + String(verdict) + ' ' + String(req.url ?? ''))
+    sendJson(res, verdict, empty)
+    return true
+  }
+
   /** GET PENDING_PATH — the Client half asks for a click newer than `since`. */
   function onPending(req, res) {
+    if (rejectUntrusted(req, res, { action: null })) return
     if (!isLoopback(req)) return sendJson(res, 403, { action: null })
     if ((req.method ?? '').toUpperCase() !== 'GET') return sendJson(res, 405, { action: null })
     lastPollAt = Date.now()
@@ -208,11 +231,13 @@ export function apply(ctx, rawConfig) {
       return sendJson(res, 200, { action: null })
     }
     lastActionServedAt = Date.now()
+    log('pending-served since=' + String(since) + ' at=' + String(action.at))
     return sendJson(res, 200, { action })
   }
 
   /** GET STATUS_PATH — local diagnostics for the click bridge. */
   function onStatus(req, res) {
+    if (rejectUntrusted(req, res, { ok: false })) return
     if (!isLoopback(req)) return sendJson(res, 403, { ok: false })
     if ((req.method ?? '').toUpperCase() !== 'GET') return sendJson(res, 405, { ok: false })
     let clientInGraph = false
@@ -239,6 +264,7 @@ export function apply(ctx, rawConfig) {
 
   /** POST REPORT_PATH — the Client half reports a DOM sample for diagnosis. */
   function onReport(req, res) {
+    if (rejectUntrusted(req, res, { ok: false })) return
     if (!isLoopback(req)) return sendJson(res, 403, { ok: false })
     if ((req.method ?? '').toUpperCase() !== 'POST') return sendJson(res, 405, { ok: false })
     let body = ''
@@ -259,6 +285,7 @@ export function apply(ctx, rawConfig) {
 
   /** POST CLICK_PATH — activate.ps1 records what the user clicked. */
   function onClick(req, res) {
+    if (rejectUntrusted(req, res, { ok: false })) return
     if (!isLoopback(req)) return sendJson(res, 403, { ok: false })
     if ((req.method ?? '').toUpperCase() !== 'POST') return sendJson(res, 405, { ok: false })
     let kind = 'complete'
@@ -284,6 +311,12 @@ export function apply(ctx, rawConfig) {
    */
   ctx.inject(['webServer'], (webCtx) => {
     const server = webCtx.webServer
+    try {
+      connection = typeof webCtx.get === 'function' ? webCtx.get('connection') : undefined
+    } catch (error) {
+      connection = undefined
+      log('connection-unavailable ' + String(error))
+    }
 
     const refreshOrigin = () => {
       try {

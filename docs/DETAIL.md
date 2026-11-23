@@ -26,7 +26,9 @@
 - **完成任务的通知**：把最新一轮的 AI 输出开头滚动到会话区域顶部下方 24px 的位置（与截图中的上端距离一致）。
 - **选择 / 批准的通知**：位置同样定位到 AI 输出开头，并把提问的第一个选项聚焦，按回车即可作答；找不到提问文本时只做滚动。
 
-实现方式：插件启用时在 `HKCU\Software\Classes` 注册 `dsh-native-toast:` 协议（禁用插件时移除），点击通知由 `powershell/activate.ps1` 处理并写入 `%TEMP%\dsh-native-toast-click.json`；Host 监听该文件，插件的 Client 半边（`client.js`）轮询 Host 的本地路由完成滚动。不依赖监听端口或网页鉴权，所以应用重启换了端口也照常工作。因此点击需要网页界面正在打开；超过 30 秒的点击会被忽略。本地路由只接受本机回环地址。
+实现方式：插件启用时在 `HKCU\Software\Classes` 注册 `dsh-native-toast:` 协议（禁用插件时移除），点击通知由 `powershell/activate.ps1` 处理并写入 `%TEMP%\dsh-native-toast-click.json`；Host 监听该文件，插件的 Client 半边（`client.js`）轮询 Host 的本地路由完成滚动。不依赖监听端口，所以应用重启换了端口也照常工作。因此点击需要网页界面正在打开；超过 30 秒的点击会被忽略。
+
+本地有四个路由：`/api/dsh-native-toast/pending`（客户端取点击）、`report`（客户端回报 DOM 诊断）、`click`（旧版 HTTP 回调，仅保留兼容）、`status`（诊断）。为了不把点击桥暴露给同一个浏览器里打开的任意外部网页，每个路由都会先调用 `ctx.connection.requestRejection({ headers })`：走 Connection 自己的 Host / Origin 校验和浏览器凭据校验，返回 401/403 时直接回同样状态，只有通过时才继续；`connection` 服务不存在（非 Web 部署）时降级放行并记日志。
 
 ## 配置
 

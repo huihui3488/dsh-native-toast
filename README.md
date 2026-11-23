@@ -15,7 +15,9 @@ DeepSeek Harness
 - **Finished turn**: the conversation scrolls so the start of the latest assistant output sits 24 px below the top of the transcript.
 - **Choice or approval**: the conversation is positioned the same way, and the pending question's first option is focused, so the answer is one keystroke away. If the question text cannot be found, only the scroll happens.
 
-This works through a per-user URL protocol, `dsh-native-toast:`, registered under `HKCU\Software\Classes` while the plugin is enabled and removed when it is disabled. The protocol handler is `powershell/activate.ps1`; it writes the click to `%TEMP%\dsh-native-toast-click.json`, the Host watches that file, and the plugin's Client half (`client.js`) polls the Host's local route and performs the scroll. No listening port or web auth is involved, so a restarted Host on a new port keeps working. Clicking needs the Web GUI page to be open; an action older than 30 seconds is ignored.
+This works through a per-user URL protocol, `dsh-native-toast:`, registered under `HKCU\Software\Classes` while the plugin is enabled and removed when it is disabled. The protocol handler is `powershell/activate.ps1`; it writes the click to `%TEMP%\dsh-native-toast-click.json`, the Host watches that file, and the plugin's Client half (`client.js`) polls the Host's local route and performs the scroll. No listening port is involved, so a restarted Host on a new port keeps working. Clicking needs the Web GUI page to be open; an action older than 30 seconds is ignored.
+
+The plugin's four local routes (`/api/dsh-native-toast/{pending,report,click,status}`) answer only the browser the Web GUI is already logged in as: each one applies `ctx.connection.requestRejection` to the incoming request, so a request without Connection's browser credential or from another Origin gets the same `401`/`403` Connection itself would return. A web page open in the same browser can therefore not read the pending click or steer the scroll target.
 
 ## What it does
 
