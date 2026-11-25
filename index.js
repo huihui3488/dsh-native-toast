@@ -191,12 +191,30 @@ export function apply(ctx, rawConfig) {
    * own routes; a plugin route has to ask for that same verdict itself.
    * Without it any web page open in the browser — same machine, same loopback
    * address — could read the pending click or steer the scroll target.
+   *
+   * The service is looked up when the first request arrives, never when the
+   * routes are registered: `webServer` activates before `connection` on a cold
+   * start, so a reference captured at registration is still undefined and the
+   * check would silently pass every request.
    */
+  function connectionService() {
+    if (connection !== undefined) return connection
+    try {
+      const found = typeof ctx.get === 'function' ? ctx.get('connection') : undefined
+      if (found !== undefined) connection = found
+      return found
+    } catch (error) {
+      log('connection-lookup-failed ' + String(error))
+      return undefined
+    }
+  }
+
   function rejectUntrusted(req, res, empty) {
-    if (!connection || typeof connection.requestRejection !== 'function') return false
+    const service = connectionService()
+    if (!service || typeof service.requestRejection !== 'function') return false
     let verdict
     try {
-      verdict = connection.requestRejection({ headers: req.headers })
+      verdict = service.requestRejection({ headers: req.headers })
     } catch (error) {
       log('trust-check-failed ' + String(error))
       return false
@@ -311,12 +329,6 @@ export function apply(ctx, rawConfig) {
    */
   ctx.inject(['webServer'], (webCtx) => {
     const server = webCtx.webServer
-    try {
-      connection = typeof webCtx.get === 'function' ? webCtx.get('connection') : undefined
-    } catch (error) {
-      connection = undefined
-      log('connection-unavailable ' + String(error))
-    }
 
     const refreshOrigin = () => {
       try {
